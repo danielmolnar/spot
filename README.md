@@ -729,6 +729,8 @@ await act.dragUntilVisible(
 ```
 
 The `act.dragUntilVisible()` continuously drags from the center of `dragStart` until it reaches `dragTarget`.
+When `dragStart` resolves to a `Scrollable`, `act.dragUntilVisible()` drags from that `Scrollable` directly.
+Otherwise, it uses the closest `Scrollable` ancestor of `dragStart`.
 
 The direction is determined by the `moveStep` parameter.
 Scrolling towards the end (bottom) of a list is archived with a negative `dy` (`Offset(0, -100)`).

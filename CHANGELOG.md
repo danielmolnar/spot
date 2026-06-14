@@ -31,6 +31,7 @@
 - Fix: `loadAppFonts()` now also registers a package's own fonts under `packages/<self>/MyFont`, so fonts referenced via `package: '<self>'` render instead of falling back to Ahem. #141
 - Fix: Assertions like `spotKey(key).existsOnce()` were extremely slow (tens of seconds) when no match was found in a large widget tree. The error output is now limited and match-all selectors are no longer suggested as "less specific" matches. #119
 - Improvement: Untyped selectors (`spot`, `spotKey`, `spotWidget`, `spotElement`, `spotTexts`) no longer add a no-op `WidgetTypeFilter<Widget>` at the root.
+- Improvement: `act.dragUntilVisible()` can now use any selector that resolves to a `Scrollable` as `dragStart`, so keyed or otherwise untyped scrollable selectors drag from that scrollable directly. #133 (thx @trejdych)
 - New: `spotAtPosition` and `WidgetSelector.atPosition` to query widgets on the hit-test path for a global screen position. #28
 
 ## 0.19.0

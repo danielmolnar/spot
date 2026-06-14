@@ -26,8 +26,12 @@ visualizes the steps of a widget test as HTML report with automatic screenshots,
 - [spot - Widget selectors](#widget-selectors-spot)
   - [Chain selectors](#chain-selectors)
   - [Selectors](#selectors)
+  - [Selector entry points](#selector-entry-points)
+  - [Text matching](#text-matching)
+  - [Hit-test position](#hit-test-position)
   - [Better errors](#better-errors)
   - [Matchers](#matchers)
+  - [Debug slow selectors](#debug-slow-selectors)
   - [Selectors vs. Matchers](#selectors-vs-matchers)
   - [Find offstage widgets](#find-offstage-widgets)
 - [act - tap, drag, type](#act---tap-drag-type-click)
@@ -314,6 +318,105 @@ final WidgetSelector<TextField> usernameTextField =
 A `WidgetSelector` may return 0, 1 or N widgets.
 Depending on how many widgets you expect to find, you should use the corresponding matchers.
 
+### Selector entry points
+
+Use `spot<W>()` when you know the widget type.
+Use the specialized entry points when the thing that identifies a widget is not only its type.
+
+```dart
+spot<ElevatedButton>(); // widgets by exact runtime type
+spotText('Save'); // Text, SelectableText and EditableText
+spotTextWhere((it) => it.startsWith('Save')); // custom text checks
+spotIcon(Icons.save); // Icon widgets by IconData
+spotKey(const ValueKey('save')); // widgets by Key
+spotWidget(myButton); // widgets by identity
+spotElement(element); // the widget associated with an Element
+spotAllWidgets(); // onstage and offstage widgets
+spotOffstage(); // only offstage widgets
+```
+
+Selectors also interoperate with Flutter's `Finder` API.
+This is useful when migrating existing tests one assertion at a time.
+
+```dart
+find.byType(ElevatedButton).spot<ElevatedButton>().existsOnce();
+await tester.tap(spot<ElevatedButton>().finder);
+```
+
+### Text matching
+
+`spotText()` is the easiest way to find text on screen.
+It matches `Text`, `SelectableText` and `EditableText`.
+By default, it matches the text a user sees, so invisible characters are removed and Unicode space separators are treated like regular spaces.
+This keeps tests readable when Flutter inserts zero width spaces or localized content uses non-breaking spaces.
+
+```dart
+spotText('Save').existsOnce();
+spotTextWhere((it) => it.startsWith('Sav')).existsOnce();
+spotText('foobar').existsOnce(); // matches Text('foo\u{200B}bar')
+spotText('foo bar').existsOnce(); // matches Text('foo\u{00A0}bar')
+```
+
+Do not use `spot<Text>()` to find text.
+It only matches `Text` widgets and misses `SelectableText` and `EditableText`.
+
+```dart
+// DON'T
+spot<Text>().withText('Save').existsOnce();
+
+// DO
+spotText('Save').existsOnce();
+```
+
+Use `raw: true` when exact characters matter.
+Use `whereRawText`, `withRawText` and `hasRawText` for exact-character selector and matcher chains.
+
+```dart
+const nonBreakingSpace = '\u{00A0}';
+
+spotText('foo$nonBreakingSpace', raw: true).existsOnce();
+spotTextWhere((it) => it.equals('foo$nonBreakingSpace'), raw: true).existsOnce();
+spotText('foo').withRawText('foo$nonBreakingSpace').existsOnce();
+spotText('foo').existsOnce().hasRawText('foo$nonBreakingSpace');
+```
+
+Use `whole: true` for whole-string matching.
+Use `raw: true` for exact-character matching.
+The deprecated `exact` flag meant whole-string matching, not exact-character matching.
+
+```dart
+spotText('Save', whole: true).existsOnce();
+spotText('Sav', whole: true).doesNotExist();
+```
+
+Use `AnyText.normalizeVisibleText()` and `AnyText.extractText()` when building custom text tooling.
+`AnyText.extractText()` returns `AnyTextContent` with both the exact `raw` text and the `normalized` text that `spotText()` matches by default.
+
+```dart
+final content = AnyText.extractText(element)!;
+
+expect(content.raw, 'foo\u{00A0}bar');
+expect(content.normalized, 'foo bar');
+expect(AnyText.normalizeVisibleText(content.raw), content.normalized);
+```
+
+### Hit-test position
+
+Use `spotAtPosition()` to query the widgets on the hit-test path at a global screen position.
+Use `.atPosition()` to filter an existing selector by the same hit-test path.
+
+```dart
+spot<IconButton>()
+    .atPosition(const Offset(400, 300))
+    .existsOnce();
+
+final hitTestPath = spotAtPosition(const Offset(400, 300)).snapshot();
+print(hitTestPath.discoveredWidgets.map((widget) => widget.toStringShort()));
+```
+
+Flutter hit testing decides which widgets match.
+Widgets that visually overlap the coordinate but do not receive hit-test events are not included.
+
 ### Better errors
 
 By chaining widget selectors, spot can provide better errors by searching the parent scope first for potential candidates.
@@ -479,6 +582,31 @@ final size = spot<Tooltip>().getRenderObjectProp(
 final message = spot<Tooltip>().getDiagnosticProp<String>('message');
 ```
 
+### Debug slow selectors
+
+Call `snapshot()` when you need to inspect the widgets a selector found.
+The returned `WidgetSnapshot` exposes the matching widgets, elements, render objects and query statistics.
+
+```dart
+final snapshot = spot<AppBar>().spotText('Home').snapshot();
+
+print(snapshot.discoveredWidgets);
+print(snapshot.discoveredElements);
+print(snapshot.queryStats);
+```
+
+`WidgetSnapshot.queryStats` reports how much work the query engine performed.
+Use it to debug selector caching, compare performance before and after a selector change, or catch bugs where relative selectors make query work grow exponentially.
+The exact numbers are implementation details and can change between spot versions.
+
+```dart
+final stats = spot<ListTile>().withText('Settings').snapshot().queryStats;
+
+expect(stats.totalChecks, lessThan(1000));
+expect(stats.cacheHits, greaterThan(0));
+print('Cache ratio: ${stats.cacheRatio}');
+```
+
 ### Selectors vs. Matchers
 
 It is recommended to use matchers instead of selectors once you have narrowed down the search space to the widget you want to assert on.
@@ -527,11 +655,10 @@ void main() {
       ),
     );
     
-    spot<Text>().withText('a').existsOnce();
-    spot<Text>().withText('c').doesNotExist();
-    spot<Text>().withText('c').overrideWidgetPresence(WidgetPresence.offstage).existsOnce();
+    spotText('a').existsOnce();
+    spotText('c').doesNotExist();
+    spotText('c').overrideWidgetPresence(WidgetPresence.offstage).existsOnce();
     
-    spotOffstage().spot<Text>().existsAtMostNTimes(3);
     spotOffstage().spotText('c').existsOnce();
     spotOffstage().overrideWidgetPresence(WidgetPresence.onstage).spotText('c').doesNotExist();
     
